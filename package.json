@@ -18,6 +18,11 @@
   "categories": [
     "Other"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openlight-photonics/kweb-gds-viewer.git"
+  },
+  "license": "MIT",
   "activationEvents": [
     "onCustomEditor:kweb-gds-viewer.gdsEditor"
   ],
