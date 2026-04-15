@@ -1,0 +1,7 @@
+# GDS viewer stack: kweb on Python 3.10+ with FastAPI/Starlette versions that still
+# expose the WebSocket API kweb expects (newer starlette removed add_websocket_route).
+# Install: pip install -r scripts/ocp-kweb-pins.txt
+kweb==1.1.10
+uvicorn[standard]==0.44.0
+fastapi==0.109.2
+starlette==0.36.3

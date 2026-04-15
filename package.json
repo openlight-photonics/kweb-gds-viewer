@@ -1,0 +1,84 @@
+{
+  "name": "kweb-gds-viewer",
+  "publisher": "optocompiler",
+  "displayName": "kweb GDS Viewer",
+  "description": "GDS/OAS layout viewer powered by kweb (Python uvicorn ASGI app) embedded in a VS Code custom editor webview.",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "keywords": [
+    "gdsii",
+    "layout",
+    "photonics",
+    "kweb",
+    "gds",
+    "oas"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCustomEditor:kweb-gds-viewer.gdsEditor"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kweb-gds-viewer.refreshGds",
+        "title": "Refresh GDS Viewer",
+        "category": "kweb GDS Viewer",
+        "icon": "$(refresh)"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "kweb-gds-viewer.gdsEditor",
+        "displayName": "kweb GDS Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.gds"
+          },
+          {
+            "filenamePattern": "*.oas"
+          }
+        ]
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "kweb-gds-viewer.refreshGds",
+          "when": "resourceExtname == .gds || resourceExtname == .oas",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "kweb GDS Viewer",
+      "properties": {
+        "kweb-gds-viewer.kwebPythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to a Python executable for the GDS kweb viewer (must satisfy kweb+uvicorn probes). When empty, discovery tries $HOME/miniforge3 and $HOME/mambaforge before the Python extension / defaultInterpreterPath. Override when kweb lives elsewhere."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "webpack --mode production",
+    "watch": "webpack --mode development --watch",
+    "lint": "eslint src --ext ts",
+    "package:vsix": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.84.0",
+    "@vscode/vsce": "^3.7.1",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.4.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.0"
+  }
+}
