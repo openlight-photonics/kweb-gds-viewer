@@ -3,7 +3,7 @@
   "publisher": "optocompiler",
   "displayName": "kweb GDS Viewer",
   "description": "GDS/OAS layout viewer powered by kweb (Python uvicorn ASGI app) embedded in a VS Code custom editor webview.",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.84.0"
   },
