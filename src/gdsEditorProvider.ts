@@ -191,6 +191,13 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider {
       display: flex; align-items: center; justify-content: center;
       height: calc(100vh - 32px); gap: 10px;
     }
+    #refresh-overlay {
+      display: none; position: absolute;
+      top: 32px; left: 0; right: 0; bottom: 0;
+      align-items: center; justify-content: center; gap: 10px;
+      background: rgba(0, 0, 0, 0.35);
+      z-index: 10;
+    }
     .spinner {
       width: 24px; height: 24px;
       border: 2px solid var(--vscode-foreground, #ccc);
@@ -200,7 +207,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider {
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
-<body>
+<body style="position:relative;">
   <div id="toolbar">
     <div>
       <span class="title">${escapeHtml(fileName)}</span>
@@ -216,31 +223,44 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <span>Starting kweb server...</span>
   </div>
   <iframe id="viewer-frame" style="display:none;"></iframe>
+  <div id="refresh-overlay">
+    <div class="spinner"></div>
+    <span>Loading...</span>
+  </div>
 
   <script nonce="${nonce}">
   (function() {
     const vscode = acquireVsCodeApi();
     const iframe = document.getElementById('viewer-frame');
     const loading = document.getElementById('loading');
+    const refreshOverlay = document.getElementById('refresh-overlay');
     const kwebUrl = ${JSON.stringify(kwebUrl)};
+    var viewerLoaded = false;
 
     function loadViewer(url) {
-      iframe.src = url;
-      iframe.onload = function() {
+      var timeoutId = setTimeout(function() {
         loading.style.display = 'none';
+        refreshOverlay.style.display = 'none';
         iframe.style.display = 'block';
-      };
-      setTimeout(function() {
-        if (loading.style.display !== 'none') {
-          loading.style.display = 'none';
-          iframe.style.display = 'block';
-        }
+        viewerLoaded = true;
       }, 8000);
+      iframe.onload = function() {
+        clearTimeout(timeoutId);
+        loading.style.display = 'none';
+        refreshOverlay.style.display = 'none';
+        iframe.style.display = 'block';
+        viewerLoaded = true;
+      };
+      iframe.src = url;
     }
 
     function refreshViewer() {
-      loading.style.display = 'flex';
-      iframe.style.display = 'none';
+      if (viewerLoaded) {
+        refreshOverlay.style.display = 'flex';
+      } else {
+        loading.style.display = 'flex';
+        iframe.style.display = 'none';
+      }
       vscode.postMessage({ command: 'refresh' });
     }
 
