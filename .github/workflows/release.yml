@@ -27,6 +27,8 @@ jobs:
   release:
     name: Build, deploy & publish
     runs-on: self-hosted
+    permissions:
+      contents: write   # required to create GitHub Releases
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
