@@ -129,33 +129,37 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           VSIX_FILE="$(ls *.vsix)"
 
+          # Write release notes to a temp file to avoid YAML heredoc indentation issues
+          NOTES_FILE="$(mktemp)"
+          {
+            echo "## kweb GDS Viewer ${VERSION}"
+            echo ""
+            echo "### Install (gol-eda1 users)"
+            echo ""
+            echo "Run the following command in your terminal:"
+            echo ""
+            echo '```bash'
+            echo "/opt/tools/kweb-gds-viewer/install"
+            echo '```'
+            echo ""
+            echo "Then reload your Cursor window: **Ctrl+Shift+P → Developer: Reload Window**"
+            echo ""
+            echo "### Update"
+            echo ""
+            echo "Re-run the same install command — it detects the version and only reinstalls when needed."
+            echo ""
+            echo "### Manual extension install"
+            echo ""
+            echo "Download the \`.vsix\` below and run:"
+            echo '```bash'
+            echo "cursor --install-extension kweb-gds-viewer-${VERSION}.vsix"
+            echo '```'
+          } > "${NOTES_FILE}"
+
           gh release create "${TAG}" \
             --title "kweb GDS Viewer ${VERSION}" \
-            --notes "$(cat <<EOF
-## kweb GDS Viewer ${VERSION}
-
-### Install (gol-eda1 users)
-
-Run the following command in your terminal:
-
-\`\`\`bash
-/opt/tools/kweb-gds-viewer/install
-\`\`\`
-
-Then reload your Cursor window: **Ctrl+Shift+P → Developer: Reload Window**
-
-### Update
-
-Re-run the same install command — it detects the version and only reinstalls when needed.
-
-### Manual extension install
-
-Download the \`.vsix\` below and run:
-\`\`\`bash
-cursor --install-extension kweb-gds-viewer-${VERSION}.vsix
-\`\`\`
-EOF
-)" \
+            --notes-file "${NOTES_FILE}" \
             "${VSIX_FILE}"
 
+          rm -f "${NOTES_FILE}"
           echo "GitHub Release ${TAG} created."
