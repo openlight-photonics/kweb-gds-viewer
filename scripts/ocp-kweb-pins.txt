@@ -5,3 +5,4 @@ kweb==1.1.10
 uvicorn[standard]==0.44.0
 fastapi==0.109.2
 starlette==0.36.3
+klayout==0.30.7

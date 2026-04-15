@@ -296,8 +296,20 @@ export class KwebServer {
     const cfg = vscode.workspace.getConfiguration("kweb-gds-viewer");
     push(cfg.get<string>("kwebPythonPath"));
 
-    // Typical user-local conda-forge installs (no setting required per workspace)
     const homeDir = process.env.HOME || process.env.USERPROFILE;
+    if (homeDir) {
+      // Installer venv created by /opt/tools/kweb-gds-viewer/install
+      const installerVenvPython = path.join(homeDir, ".local", "share", "kweb-gds-viewer", "venv", "bin", "python");
+      try {
+        if (fs.existsSync(installerVenvPython)) {
+          push(installerVenvPython);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // Typical user-local conda-forge installs (no setting required per workspace)
     if (homeDir) {
       for (const rel of [
         path.join("miniforge3", "bin", "python"),
@@ -359,7 +371,9 @@ export class KwebServer {
     throw new Error(
       "Could not find a Python with kweb+uvicorn: either `import kweb.default, uvicorn` (kweb 2.x, Python 3.11+) " +
         "or `import kweb.main, uvicorn` (older kweb 0.1.x; PyPI wheels still need Python 3.9+). " +
-        `${hint} Set kweb-gds-viewer.kwebPythonPath, or install Miniforge in your home directory and pip install -r scripts/ocp-kweb-pins.txt.`
+        `${hint} ` +
+        "Run /opt/tools/kweb-gds-viewer/install to set up the required Python environment, " +
+        "or set optocompiler-plus.kwebPythonPath, or install Miniforge in your home directory and pip install -r scripts/ocp-kweb-pins.txt."
     );
   }
 

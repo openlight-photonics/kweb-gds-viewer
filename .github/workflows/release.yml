@@ -1,0 +1,167 @@
+name: Release
+
+# Triggered by pushing a version tag, e.g.:
+#   git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags:
+      - "v*"
+
+# ── One-time admin setup required on gol-eda1 ─────────────────────────────────
+# The deploy directory must exist and be writable by the runner user (mwilliams).
+# Run once as root / sudo on gol-eda1:
+#
+#   sudo mkdir -p /opt/tools/kweb-gds-viewer
+#   sudo chown mwilliams:"domain users" /opt/tools/kweb-gds-viewer
+#   sudo chmod 755 /opt/tools/kweb-gds-viewer
+#
+# This follows the same convention as /opt/tools/gds2oa/ already on this server.
+# ──────────────────────────────────────────────────────────────────────────────
+
+env:
+  DEPLOY_ROOT: /opt/tools/kweb-gds-viewer
+  # Python used to download wheels must match the platform of gol-eda1 (linux/x86_64, Python 3.11)
+  WHEEL_PYTHON: /home-shared/mwilliams/miniforge3/envs/ocp-kweb/bin/python3
+
+jobs:
+  release:
+    name: Build, deploy & publish
+    runs-on: self-hosted
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Extract version from tag ──────────────────────────────────────────
+      - name: Set version
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"           # e.g. v0.2.0
+          VERSION="${TAG#v}"                 # e.g. 0.2.0
+          echo "tag=${TAG}"       >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version ${VERSION} from tag ${TAG}"
+
+      # ── 3. Verify package.json version matches tag ────────────────────────────
+      - name: Verify version consistency
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [[ "${PKG_VERSION}" != "${TAG_VERSION}" ]]; then
+            echo "ERROR: package.json version (${PKG_VERSION}) does not match tag (${TAG_VERSION})"
+            echo "Update package.json \"version\" field to ${TAG_VERSION} before tagging."
+            exit 1
+          fi
+          echo "Version check passed: ${PKG_VERSION}"
+
+      # ── 4. Build TypeScript + package VSIX ────────────────────────────────────
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Compile TypeScript
+        run: npm run build
+
+      - name: Package VSIX
+        run: |
+          npx vsce package --no-dependencies
+          ls -lh *.vsix
+
+      # ── 5. Download Python wheels for offline install ─────────────────────────
+      - name: Download Python wheels
+        run: |
+          mkdir -p wheels
+          "${WHEEL_PYTHON}" -m pip download \
+            --quiet \
+            --dest wheels/ \
+            --requirement scripts/ocp-kweb-pins.txt
+          echo "Downloaded $(ls wheels/*.whl 2>/dev/null | wc -l) wheel(s):"
+          ls -lh wheels/*.whl
+
+      # ── 6. Deploy to /opt/tools/kweb-gds-viewer/<version>/ ───────────────────
+      - name: Deploy to /opt/tools
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DEST="${DEPLOY_ROOT}/${VERSION}"
+
+          mkdir -p "${DEST}/wheels"
+
+          # Copy VSIX
+          cp *.vsix "${DEST}/"
+
+          # Copy wheels
+          cp wheels/*.whl "${DEST}/wheels/"
+
+          # Copy installer script
+          cp scripts/install.sh "${DEST}/install.sh"
+          chmod +x "${DEST}/install.sh"
+
+          # Write version.txt so the installer knows what it's installing
+          echo "${VERSION}" > "${DEST}/version.txt"
+
+          echo "Deployed to ${DEST}:"
+          ls -lh "${DEST}/"
+
+      # ── 7. Update 'latest' symlink and top-level entry point ─────────────────
+      - name: Update latest symlink
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # latest -> <version>/
+          ln -sfn "${VERSION}" "${DEPLOY_ROOT}/latest"
+
+          # /opt/tools/kweb-gds-viewer/install -> latest/install.sh
+          # Use an explicit relative symlink so it resolves correctly
+          ln -sfn "latest/install.sh" "${DEPLOY_ROOT}/install"
+          chmod +x "${DEPLOY_ROOT}/install"
+
+          echo "Symlinks updated:"
+          ls -la "${DEPLOY_ROOT}/latest" "${DEPLOY_ROOT}/install"
+
+      # ── 8. Create GitHub Release ───────────────────────────────────────────────
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          VSIX_FILE="$(ls *.vsix)"
+
+          # Write release notes to a temp file to avoid YAML heredoc indentation issues
+          NOTES_FILE="$(mktemp)"
+          {
+            echo "## kweb GDS Viewer ${VERSION}"
+            echo ""
+            echo "### Install (gol-eda1 users)"
+            echo ""
+            echo "Run the following command in your terminal:"
+            echo ""
+            echo '```bash'
+            echo "/opt/tools/kweb-gds-viewer/install"
+            echo '```'
+            echo ""
+            echo "Then reload your Cursor window: **Ctrl+Shift+P → Developer: Reload Window**"
+            echo ""
+            echo "### Update"
+            echo ""
+            echo "Re-run the same install command — it detects the version and only reinstalls when needed."
+            echo ""
+            echo "### Manual extension install"
+            echo ""
+            echo "Download the \`.vsix\` below and run:"
+            echo '```bash'
+            echo "cursor --install-extension kweb-gds-viewer-${VERSION}.vsix"
+            echo '```'
+          } > "${NOTES_FILE}"
+
+          gh release create "${TAG}" \
+            --title "kweb GDS Viewer ${VERSION}" \
+            --notes-file "${NOTES_FILE}" \
+            "${VSIX_FILE}"
+
+          rm -f "${NOTES_FILE}"
+          echo "GitHub Release ${TAG} created."
