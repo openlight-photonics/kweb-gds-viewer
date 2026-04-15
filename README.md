@@ -2,6 +2,32 @@
 
 A VS Code / Cursor extension that opens `.gds` and `.oas` layout files directly in the editor using [kweb](https://github.com/gdsfactory/kweb) as an embedded local server.
 
+## Installation (gol-eda1 users)
+
+Connect to `gol-eda1` via Cursor SSH and run a single command in the terminal:
+
+```bash
+/opt/tools/kweb-gds-viewer/install
+```
+
+That's it. The script will:
+
+- Set up a Python environment with all required packages (no internet or root access needed)
+- Install the Cursor extension automatically
+- Configure the correct Python path so `.gds` files open immediately
+
+After it completes, reload your Cursor window (**Ctrl+Shift+P → Developer: Reload Window**), then open any `.gds` or `.oas` file.
+
+### Updating to a new version
+
+Re-run the same command — it detects whether you're already current and only reinstalls when a newer version has been deployed:
+
+```bash
+/opt/tools/kweb-gds-viewer/install
+```
+
+---
+
 ## How it works
 
 When you open a `.gds` or `.oas` file, the extension:
@@ -10,30 +36,18 @@ When you open a `.gds` or `.oas` file, the extension:
 2. Starts a local `uvicorn` ASGI server on port `8078` (kweb), pointed at the directory containing the file.
 3. Renders the layout in a webview iframe that connects to the local server.
 
-The server is shared across all open GDS files in the same directory and is stopped automatically when VS Code exits.
-
-## Requirements
-
-- **Python 3.10+** with `kweb` and `uvicorn` installed (Python 3.11+ recommended for kweb 2.x).
-- Legacy kweb 0.1.x is also supported on Python 3.8+.
-
-### Recommended install
-
-```bash
-pip install -r scripts/ocp-kweb-pins.txt
-```
-
-This installs a pinned stack (`kweb==1.1.10`, `uvicorn`, `fastapi`, `starlette`) that is known to work. Newer starlette versions removed the WebSocket API that kweb 1.x depends on.
+The server is shared across all open GDS files in the same directory and is stopped automatically when Cursor exits.
 
 ## Python discovery order
 
 The extension searches for a suitable Python interpreter in this order:
 
 1. `kweb-gds-viewer.kwebPythonPath` setting (if set).
-2. `~/miniforge3/bin/python` and `~/mambaforge/bin/python` (common conda-forge installs).
-3. The active environment from the [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python).
-4. `python.defaultInterpreterPath` workspace setting.
-5. `python3` / `python` on `PATH`.
+2. `~/.local/share/kweb-gds-viewer/venv/bin/python` (created by the installer above).
+3. `~/miniforge3/bin/python` and `~/mambaforge/bin/python` (common conda-forge installs).
+4. The active environment from the [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python).
+5. `python.defaultInterpreterPath` workspace setting.
+6. `python3` / `python` on `PATH`.
 
 Each candidate is probed for `import kweb.default, uvicorn` (kweb 2.x / 1.x) then `import kweb.main, uvicorn` (kweb 0.1.x legacy).
 
