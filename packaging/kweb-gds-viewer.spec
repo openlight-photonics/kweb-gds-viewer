@@ -15,6 +15,12 @@ AutoReqProv:    no
 # treats as a fatal error. We have no source to debug anyway.
 %define debug_package %{nil}
 
+# Disable /usr/lib/.build-id symlink generation. Our bundled Python ships the
+# same shared libraries (libssl, libcrypto, libffi, etc.) as system packages.
+# Without this, RPM creates build-id symlinks that conflict with libidn2, brotli,
+# krb5-libs, and many others already installed on the host.
+%global _build_id_links none
+
 # Disable post-install BRP processing: brp-mangle-shebangs rewrites
 # #!/usr/bin/env python3 in the bundled stdlib to #!/usr/libexec/platform-python
 # (Python 3.6), and brp-python-bytecompile fails trying to compile py3.12 files.
@@ -97,6 +103,10 @@ echo "  %{instdir}/install"
 # Nothing to clean up in the shared tree; user per-extension data lives in ~/
 
 %changelog
+* Thu Apr 16 2026 optocompiler <admin@optocompiler> - 1.1.1-1
+- Fix build-id symlink conflicts with system packages (libidn2, brotli, krb5-libs, etc.).
+  Add %%global _build_id_links none to suppress /usr/lib/.build-id/ entries.
+
 * Thu Apr 16 2026 optocompiler <admin@optocompiler> - 1.1.0-1
 - Add RPM packaging with bundled python-build-standalone 3.12 and kweb 1.1.10.
 - Zero external Python dependencies; works on AlmaLinux 8/9/10 out of the box.
