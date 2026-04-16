@@ -296,7 +296,17 @@ export class KwebServer {
     const cfg = vscode.workspace.getConfiguration("kweb-gds-viewer");
     push(cfg.get<string>("kwebPythonPath"));
 
-    // Shared venv installed by admin via: sudo scripts/admin-install.sh
+    // RPM install layout: /opt/tools/kweb-gds-viewer/bin/python -> ../python/bin/python3.12
+    const rpmPython = path.join("/opt", "tools", "kweb-gds-viewer", "bin", "python");
+    try {
+      if (fs.existsSync(rpmPython)) {
+        push(rpmPython);
+      }
+    } catch {
+      // ignore
+    }
+
+    // admin-install.sh venv layout (backward compat for hosts not yet on RPM)
     const sharedVenvPython = path.join("/opt", "tools", "kweb-gds-viewer", "venv", "bin", "python");
     try {
       if (fs.existsSync(sharedVenvPython)) {

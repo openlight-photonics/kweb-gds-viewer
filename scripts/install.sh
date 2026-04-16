@@ -9,7 +9,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 INSTALL_ROOT="${SCRIPT_DIR}"
-VENV_PYTHON="${INSTALL_ROOT}/venv/bin/python"
+
+# RPM layout uses a stable symlink at bin/python -> ../python/bin/python3.12
+# admin-install.sh (legacy) uses venv/bin/python — fall back to that if present.
+if [[ -x "${INSTALL_ROOT}/bin/python" ]]; then
+    VENV_PYTHON="${INSTALL_ROOT}/bin/python"
+elif [[ -x "${INSTALL_ROOT}/venv/bin/python" ]]; then
+    VENV_PYTHON="${INSTALL_ROOT}/venv/bin/python"
+else
+    VENV_PYTHON="${INSTALL_ROOT}/bin/python"  # will fail pre-check with a clear message
+fi
 
 info()    { printf '\e[1;34m[kweb-gds-viewer]\e[0m %s\n' "$*"; }
 success() { printf '\e[1;32m[kweb-gds-viewer]\e[0m %s\n' "$*"; }

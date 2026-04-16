@@ -1,31 +1,28 @@
 name: Release
 
 # Triggered by pushing a version tag, e.g.:
-#   git tag v0.2.0 && git push origin v0.2.0
+#   git tag v1.1.0 && git push origin v1.1.0
 on:
   push:
     tags:
       - "v*"
 
 # ── One-time admin setup required on gol-eda1 ─────────────────────────────────
-# The deploy directory must exist and be writable by the runner user (mwilliams).
+# The RPM repo directory must exist and be writable by the runner user (mwilliams).
 # Run once as root / sudo on gol-eda1:
 #
-#   sudo mkdir -p /opt/tools/kweb-gds-viewer
-#   sudo chown mwilliams:"domain users" /opt/tools/kweb-gds-viewer
-#   sudo chmod 755 /opt/tools/kweb-gds-viewer
+#   sudo mkdir -p /opt/tools/kweb-gds-viewer-rpms
+#   sudo chown mwilliams:"domain users" /opt/tools/kweb-gds-viewer-rpms
+#   sudo chmod 755 /opt/tools/kweb-gds-viewer-rpms
 #
-# This follows the same convention as /opt/tools/gds2oa/ already on this server.
 # ──────────────────────────────────────────────────────────────────────────────
 
 env:
-  DEPLOY_ROOT: /opt/tools/kweb-gds-viewer
-  # Python used to download wheels must match the platform of gol-eda1 (linux/x86_64, Python 3.11)
-  WHEEL_PYTHON: /home-shared/mwilliams/miniforge3/envs/ocp-kweb/bin/python3
+  RPM_REPO_DIR: /opt/tools/kweb-gds-viewer-rpms
 
 jobs:
   release:
-    name: Build, deploy & publish
+    name: Build RPM, publish & deploy
     runs-on: self-hosted
     permissions:
       contents: write   # required to create GitHub Releases
@@ -43,9 +40,9 @@ jobs:
       - name: Set version
         id: version
         run: |
-          TAG="${GITHUB_REF_NAME}"           # e.g. v0.2.0
-          VERSION="${TAG#v}"                 # e.g. 0.2.0
-          echo "tag=${TAG}"       >> "$GITHUB_OUTPUT"
+          TAG="${GITHUB_REF_NAME}"           # e.g. v1.1.0
+          VERSION="${TAG#v}"                 # e.g. 1.1.0
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building version ${VERSION} from tag ${TAG}"
 
@@ -61,96 +58,66 @@ jobs:
           fi
           echo "Version check passed: ${PKG_VERSION}"
 
-      # ── 4. Build TypeScript + package VSIX ────────────────────────────────────
+      # ── 4. Install Node dependencies ─────────────────────────────────────────
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Compile TypeScript
-        run: npm run build
-
-      - name: Package VSIX
-        run: |
-          npx vsce package --no-dependencies
-          ls -lh *.vsix
-
-      # ── 5. Download Python wheels for offline install ─────────────────────────
-      - name: Download Python wheels
-        run: |
-          mkdir -p wheels
-          "${WHEEL_PYTHON}" -m pip download \
-            --quiet \
-            --dest wheels/ \
-            --requirement scripts/ocp-kweb-pins.txt
-          echo "Downloaded $(ls wheels/*.whl 2>/dev/null | wc -l) wheel(s):"
-          ls -lh wheels/*.whl
-
-      # ── 6. Deploy to /opt/tools/kweb-gds-viewer/<version>/ ───────────────────
-      - name: Deploy to /opt/tools
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          DEST="${DEPLOY_ROOT}/${VERSION}"
-
-          mkdir -p "${DEST}/wheels"
-
-          # Copy VSIX
-          cp *.vsix "${DEST}/"
-
-          # Copy wheels
-          cp wheels/*.whl "${DEST}/wheels/"
-
-          # Copy installer script
-          cp scripts/install.sh "${DEST}/install.sh"
-          chmod +x "${DEST}/install.sh"
-
-          # Write version.txt so the installer knows what it's installing
-          echo "${VERSION}" > "${DEST}/version.txt"
-
-          echo "Deployed to ${DEST}:"
-          ls -lh "${DEST}/"
-
-      # ── 7. Update 'latest' symlink and top-level entry point ─────────────────
-      - name: Update latest symlink
+      # ── 5. Build RPM (calls build-rpm.sh which builds .vsix + downloads PBS + wheels) ──
+      - name: Build RPM
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          # latest -> <version>/
-          ln -sfn "${VERSION}" "${DEPLOY_ROOT}/latest"
+          # build-rpm.sh reads VERSION from the spec --define, not package.json,
+          # so we temporarily patch it.  The spec already uses %{_version}.
+          # build-rpm.sh also picks up the correct package.json version via vsce.
+          bash packaging/build-rpm.sh
 
-          # /opt/tools/kweb-gds-viewer/install -> latest/install.sh
-          # Use an explicit relative symlink so it resolves correctly
-          ln -sfn "latest/install.sh" "${DEPLOY_ROOT}/install"
-          chmod +x "${DEPLOY_ROOT}/install"
+          RPM_FILE="$(ls packaging/dist/*.rpm | head -1)"
+          echo "rpm_file=${RPM_FILE}" >> "$GITHUB_OUTPUT"
+          echo "Built: ${RPM_FILE} ($(du -sh "${RPM_FILE}" | cut -f1))"
+        id: rpm
 
-          echo "Symlinks updated:"
-          ls -la "${DEPLOY_ROOT}/latest" "${DEPLOY_ROOT}/install"
+      # ── 6. Publish RPM to local dnf repo ─────────────────────────────────────
+      - name: Publish to dnf repo
+        run: |
+          mkdir -p "${RPM_REPO_DIR}"
+          bash packaging/make-repo.sh "${RPM_REPO_DIR}"
+          echo "RPM repo updated at ${RPM_REPO_DIR}"
+          ls -lh "${RPM_REPO_DIR}"/*.rpm
 
-      # ── 8. Create GitHub Release ───────────────────────────────────────────────
+      # ── 7. Create GitHub Release with .vsix + .rpm as assets ─────────────────
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           VERSION="${{ steps.version.outputs.version }}"
-          VSIX_FILE="$(ls *.vsix)"
+          VSIX_FILE="$(ls *.vsix | head -1)"
+          RPM_FILE="${{ steps.rpm.outputs.rpm_file }}"
 
-          # Write release notes to a temp file to avoid YAML heredoc indentation issues
           NOTES_FILE="$(mktemp)"
           {
             echo "## kweb GDS Viewer ${VERSION}"
             echo ""
-            echo "### Install (gol-eda1 users)"
+            echo "### Install on gol-eda1 (admin, once)"
             echo ""
-            echo "Run the following command in your terminal:"
+            echo "Download the \`.rpm\` below and run:"
+            echo '```bash'
+            echo "sudo dnf localinstall kweb-gds-viewer-${VERSION}-1.el8.x86_64.rpm"
+            echo '```'
+            echo ""
+            echo "Or, if the local dnf repo is configured:"
+            echo '```bash'
+            echo "sudo dnf install kweb-gds-viewer"
+            echo '```'
+            echo ""
+            echo "### Per-user setup (no sudo)"
             echo ""
             echo '```bash'
             echo "/opt/tools/kweb-gds-viewer/install"
             echo '```'
             echo ""
-            echo "Then reload your Cursor window: **Ctrl+Shift+P → Developer: Reload Window**"
-            echo ""
-            echo "### Update"
-            echo ""
-            echo "Re-run the same install command — it detects the version and only reinstalls when needed."
+            echo "Then reload Cursor: **Ctrl+Shift+P → Developer: Reload Window**"
             echo ""
             echo "### Manual extension install"
             echo ""
@@ -163,7 +130,8 @@ jobs:
           gh release create "${TAG}" \
             --title "kweb GDS Viewer ${VERSION}" \
             --notes-file "${NOTES_FILE}" \
-            "${VSIX_FILE}"
+            "${VSIX_FILE}" \
+            "${RPM_FILE}"
 
           rm -f "${NOTES_FILE}"
           echo "GitHub Release ${TAG} created."
