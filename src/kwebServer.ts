@@ -69,31 +69,33 @@ export class KwebServer {
     this.outputChannel.appendLine(message);
   }
 
-  viewUrl(gdsAbsPath: string, revision?: string): string {
+  viewUrl(gdsAbsPath: string, revision?: string, layerPropsAbsPath?: string): string {
     if (this._kwebFlavor === "legacy") {
       const suffix = revision ? `&v=${encodeURIComponent(revision)}` : "";
-      return `${this.baseUrl}/gds?gds_file=${encodeURIComponent(gdsAbsPath)}${suffix}`;
+      const lp = layerPropsAbsPath ? `&layer_props=${encodeURIComponent(layerPropsAbsPath)}` : "";
+      return `${this.baseUrl}/gds?gds_file=${encodeURIComponent(gdsAbsPath)}${suffix}${lp}`;
     }
 
     const relative = path.relative(this._filesLocation, gdsAbsPath).replace(/\\/g, "/");
-    const vq = revision ? `&v=${encodeURIComponent(revision)}` : "";
-    const vpath = revision ? `?v=${encodeURIComponent(revision)}` : "";
 
     if (this._viewerUrlStyle === "query") {
-      return `${this.baseUrl}/view?file=${encodeURIComponent(relative)}${vq}`;
+      const vq = revision ? `&v=${encodeURIComponent(revision)}` : "";
+      const lp = layerPropsAbsPath ? `&layer_props=${encodeURIComponent(layerPropsAbsPath)}` : "";
+      return `${this.baseUrl}/view?file=${encodeURIComponent(relative)}${vq}${lp}`;
     }
 
+    // Path-style URLs (/gds/<name> or /file/<name>) — build query string from parts.
     const lower = gdsAbsPath.toLowerCase();
-    if (lower.endsWith(".oas")) {
-      const enc = relative.split("/").filter(Boolean).map(encodeURIComponent).join("/");
-      return `${this.baseUrl}/file/${enc}${vpath}`;
-    }
-
+    const enc = relative.split("/").filter(Boolean).map(encodeURIComponent).join("/");
     // kweb path route resolves (fileslocation / gds_name).with_suffix(".gds").
     // Stripping ".gds" from "cell.generated.gds" yields "cell.generated", and
     // Path("cell.generated").with_suffix(".gds") becomes "cell.gds" — wrong file.
-    const enc = relative.split("/").filter(Boolean).map(encodeURIComponent).join("/");
-    return `${this.baseUrl}/gds/${enc}${vpath}`;
+    const base = lower.endsWith(".oas") ? `${this.baseUrl}/file/${enc}` : `${this.baseUrl}/gds/${enc}`;
+    const qparts: string[] = [];
+    if (revision) { qparts.push(`v=${encodeURIComponent(revision)}`); }
+    if (layerPropsAbsPath) { qparts.push(`layer_props=${encodeURIComponent(layerPropsAbsPath)}`); }
+    const qs = qparts.length ? `?${qparts.join("&")}` : "";
+    return `${base}${qs}`;
   }
 
   async start(filesLocation: string, port?: number): Promise<void> {
@@ -105,9 +107,25 @@ export class KwebServer {
       await this.stop();
     }
 
+    const cfg = vscode.workspace.getConfiguration("kweb-gds-viewer");
+    const configuredPort = cfg.get<number>("kwebPort");
+    const envPort = process.env.KWEB_GDS_VIEWER_PORT ? parseInt(process.env.KWEB_GDS_VIEWER_PORT, 10) : undefined;
     this._filesLocation = filesLocation;
-    this._port = port ?? DEFAULT_PORT;
+    this._port = port ?? envPort ?? configuredPort ?? DEFAULT_PORT;
     this.startupFailureMessage = "";
+
+    // If a kweb server is already healthy on this port and serving the same
+    // files location (e.g. the installed extension's kweb is still running),
+    // reuse it rather than spawning a new conflicting process.
+    if (await this.healthCheck()) {
+      this._ready = true;
+      const statusOk = await this.httpGetReturns200(`${this.baseUrl}/status`);
+      this._viewerUrlStyle = statusOk ? "query" : "path";
+      this.outputChannel.appendLine(
+        `kweb server already running on port ${this._port} — reusing it (files location may differ).`
+      );
+      return;
+    }
 
     const { inv: pyInv, flavor } = await this.findPython();
     this._kwebFlavor = flavor;
@@ -152,10 +170,21 @@ export class KwebServer {
       }
     });
 
-    this.process.on("exit", (code) => {
+    this.process.on("exit", async (code) => {
       this.outputChannel.appendLine(`kweb server exited with code ${code}`);
       if (!this._ready && !this.startupFailureMessage) {
-        this.startupFailureMessage = `kweb server exited before becoming ready (code ${code ?? "unknown"}).`;
+        // Check whether port conflict caused the failure.
+        const portInUse = await this.httpGetReturns200(`${this.baseUrl}/`).catch(() => false) ||
+          await this.httpGetReturns200(`${this.baseUrl}/status`).catch(() => false);
+        if (portInUse) {
+          this.startupFailureMessage =
+            `Port ${this._port} is already in use by another process. ` +
+            `If the installed extension is running alongside a debug Extension Host, ` +
+            `set "kweb-gds-viewer.kwebPort" to a free port (e.g. 8077) in ` +
+            `.vscode/settings.json of the extension project.`;
+        } else {
+          this.startupFailureMessage = `kweb server exited before becoming ready (code ${code ?? "unknown"}).`;
+        }
       }
       this._ready = false;
       this.process = null;

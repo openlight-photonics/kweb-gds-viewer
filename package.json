@@ -66,6 +66,16 @@
           "type": "string",
           "default": "",
           "description": "Optional path to a Python executable for the GDS kweb viewer (must satisfy kweb+uvicorn probes). When empty, discovery tries $HOME/miniforge3 and $HOME/mambaforge before the Python extension / defaultInterpreterPath. Override when kweb lives elsewhere."
+        },
+        "kweb-gds-viewer.layerPropertiesFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a KLayout layer properties file (.lyp) to apply when viewing GDS/OAS files. Accepts an absolute path or a path relative to the workspace root. When empty, the viewer auto-detects a .lyp file in the same directory as the opened GDS file, then falls back to the workspace root."
+        },
+        "kweb-gds-viewer.kwebPort": {
+          "type": "number",
+          "default": 8078,
+          "description": "TCP port for the kweb GDS server. Change this when running a debug Extension Host alongside the installed extension to avoid port conflicts (e.g. set to 8077 in the workspace .vscode/settings.json of the extension project)."
         }
       }
     }

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "path";
+import * as fs from "fs";
 import { KwebServer } from "./kwebServer";
 
 const activeEditors: Set<GdsEditorProvider> = new Set();
@@ -74,22 +75,29 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const filePath = document.uri.fsPath;
     const fileName = path.basename(filePath);
     const dirPath = path.dirname(filePath);
+    const layerPropsPath = this.resolveLayerPropsPath(filePath);
     try {
       await this.kwebServer.start(dirPath);
-      const internalUrl = this.kwebServer.viewUrl(filePath, String(Date.now()));
+      const internalUrl = this.kwebServer.viewUrl(filePath, String(Date.now()), layerPropsPath);
       const viewerUrl = await this.resolveKwebViewerUrl(internalUrl);
       if (viewerUrl !== internalUrl) {
         this.kwebServer.appendDiagnosticLine(
           `GDS viewer: using forwarded URL for ${fileName} (Remote-SSH). If kweb shows "No gds found", the webview may not be reaching this host — check port forwarding and kweb GDS Viewer files location.`
         );
       }
+      this.kwebServer.appendDiagnosticLine(
+        layerPropsPath
+          ? `GDS viewer: layer properties → ${layerPropsPath}`
+          : `GDS viewer: no .lyp found — layers will show as layer/datatype numbers`
+      );
+      this.kwebServer.appendDiagnosticLine(`GDS viewer: kweb URL → ${internalUrl}`);
       webview.html = this.getKwebHtml(webview, fileName, viewerUrl);
 
       webview.onDidReceiveMessage(async (msg) => {
         if (msg.command === "refresh") {
           try {
             await this.kwebServer.restart();
-            const newInternal = this.kwebServer.viewUrl(filePath, String(Date.now()));
+            const newInternal = this.kwebServer.viewUrl(filePath, String(Date.now()), layerPropsPath);
             const newViewer = await this.resolveKwebViewerUrl(newInternal);
             await webview.postMessage({ command: "updateUrl", url: newViewer });
           } catch {
@@ -124,17 +132,82 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   /* ------------------------------------------------------------------ */
+  /*  Layer properties resolution                                        */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Resolves the path to a KLayout layer properties (.lyp) file.
+   * Resolution order:
+   *   1. kweb-gds-viewer.layerPropertiesFile setting (absolute or workspace-relative)
+   *   2. <gdsBasename>.lyp in the same directory as the GDS file
+   *   3. Any .lyp file in the same directory as the GDS file
+   *   4. Any .lyp file in the workspace root
+   *   5. Any .lyp file bundled in the extension's own install directory
+   */
+  private resolveLayerPropsPath(gdsFilePath: string): string | undefined {
+    const cfg = vscode.workspace.getConfiguration("kweb-gds-viewer");
+    const configured = cfg.get<string>("layerPropertiesFile")?.trim();
+
+    if (configured) {
+      const abs = path.isAbsolute(configured)
+        ? configured
+        : path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "", configured);
+      return fs.existsSync(abs) ? abs : undefined;
+    }
+
+    const gdsDir = path.dirname(gdsFilePath);
+    const gdsBase = path.basename(gdsFilePath, path.extname(gdsFilePath));
+
+    const sameName = path.join(gdsDir, `${gdsBase}.lyp`);
+    if (fs.existsSync(sameName)) { return sameName; }
+
+    try {
+      const hit = fs.readdirSync(gdsDir).find((f) => f.toLowerCase().endsWith(".lyp"));
+      if (hit) { return path.join(gdsDir, hit); }
+    } catch { /* ignore */ }
+
+    const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (wsRoot && wsRoot !== gdsDir) {
+      try {
+        const hit = fs.readdirSync(wsRoot).find((f) => f.toLowerCase().endsWith(".lyp"));
+        if (hit) { return path.join(wsRoot, hit); }
+      } catch { /* ignore */ }
+    }
+
+    // Fall back to any .lyp bundled in the extension's own install directory.
+    // This ensures a bundled PDK layer map (e.g. PH18DA.lyp) is always applied
+    // even when the GDS being viewed lives in an unrelated workspace.
+    const extDir = this.context.extensionUri.fsPath;
+    if (extDir !== gdsDir && extDir !== wsRoot) {
+      try {
+        const hit = fs.readdirSync(extDir).find((f) => f.toLowerCase().endsWith(".lyp"));
+        if (hit) { return path.join(extDir, hit); }
+      } catch { /* ignore */ }
+    }
+
+    return undefined;
+  }
+
+  /* ------------------------------------------------------------------ */
   /*  kweb iframe viewer                                                 */
   /* ------------------------------------------------------------------ */
 
   /**
    * Webviews run on the client; under Remote-SSH, plain http://127.0.0.1:8078
    * would hit the laptop, not the host running kweb. asExternalUri tunnels it.
+   *
+   * The query string is stripped before calling asExternalUri and re-attached
+   * afterwards. VS Code's Remote-SSH port-forwarding proxy re-encodes '=' and
+   * '&' in query strings (turning them into %3D / %26), which breaks FastAPI's
+   * query-param parsing and causes layer_props to arrive as null.
    */
   private async resolveKwebViewerUrl(internalHttpUrl: string): Promise<string> {
     try {
-      const mapped = await vscode.env.asExternalUri(vscode.Uri.parse(internalHttpUrl));
-      return mapped.toString();
+      const qIdx = internalHttpUrl.indexOf("?");
+      const base = qIdx >= 0 ? internalHttpUrl.slice(0, qIdx) : internalHttpUrl;
+      const query = qIdx >= 0 ? internalHttpUrl.slice(qIdx) : "";
+      const mapped = await vscode.env.asExternalUri(vscode.Uri.parse(base));
+      return mapped.toString() + query;
     } catch {
       return internalHttpUrl;
     }
