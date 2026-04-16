@@ -296,9 +296,19 @@ export class KwebServer {
     const cfg = vscode.workspace.getConfiguration("kweb-gds-viewer");
     push(cfg.get<string>("kwebPythonPath"));
 
+    // Shared venv installed by admin via: sudo scripts/admin-install.sh
+    const sharedVenvPython = path.join("/opt", "tools", "kweb-gds-viewer", "venv", "bin", "python");
+    try {
+      if (fs.existsSync(sharedVenvPython)) {
+        push(sharedVenvPython);
+      }
+    } catch {
+      // ignore
+    }
+
     const homeDir = process.env.HOME || process.env.USERPROFILE;
     if (homeDir) {
-      // Installer venv created by /opt/tools/kweb-gds-viewer/install
+      // Per-user venv (legacy layout, kept for backward compat)
       const installerVenvPython = path.join(homeDir, ".local", "share", "kweb-gds-viewer", "venv", "bin", "python");
       try {
         if (fs.existsSync(installerVenvPython)) {
@@ -372,8 +382,8 @@ export class KwebServer {
       "Could not find a Python with kweb+uvicorn: either `import kweb.default, uvicorn` (kweb 2.x, Python 3.11+) " +
         "or `import kweb.main, uvicorn` (older kweb 0.1.x; PyPI wheels still need Python 3.9+). " +
         `${hint} ` +
-        "Run /opt/tools/kweb-gds-viewer/install to set up the required Python environment, " +
-        "or set optocompiler-plus.kwebPythonPath, or install Miniforge in your home directory and pip install -r scripts/ocp-kweb-pins.txt."
+        "Ask your admin to run: sudo scripts/admin-install.sh — then run /opt/tools/kweb-gds-viewer/install (no sudo). " +
+        "Or set kweb-gds-viewer.kwebPythonPath to a Python with kweb+uvicorn installed."
     );
   }
 
